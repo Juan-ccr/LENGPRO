@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Analizador de Datos Estudiantiles</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      background-color: #121212;
+      color: #e0e0e0;
+      margin: 20px;
+    }
+    .container {
+      max-width: 900px;
+      margin: auto;
+      background-color: #1e1e1e;
+      padding: 20px;
+      border-radius: 8px;
+      box-shadow: 0 0 10px rgba(255, 0, 0, 0.2);
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 20px;
+      background-color: #2c2c2c;
+    }
+    th, td {
+      border: 1px solid #444;
+      padding: 8px;
+    }
+    th {
+      background-color: #b71c1c;
+      color: white;
+    }
+    .filters, .export-buttons {
+      margin-top: 20px;
+    }
+    button {
+      background-color: #b71c1c;
+      color: white;
+      border: none;
+      padding: 8px 16px;
+      border-radius: 4px;
+      cursor: pointer;
+    }
+    input, select {
+      background-color: #2c2c2c;
+      color: #e0e0e0;
+      border: 1px solid #444;
+      border-radius: 4px;
+      padding: 6px;
+      margin-right: 10px;
+    }
+    canvas {
+      margin-top: 30px;
+      background-color: #fff;
+      border-radius: 8px;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>Analizador de Datos Estudiantiles</h1>
+    <input type="file" id="fileInput" accept=".xlsx">
+
+    <div class="filters">
+      <label>Apellido contiene: </label><input type="text" id="filterSurname">
+      <label>Carrera: </label><input type="text" id="filterCarrera">
+      <label>Calificación mínima en cualquier AF: </label><input type="number" id="filterAF" min="0" max="100">
+      <button onclick="applyFilter()">Aplicar Filtros</button>
+    </div>
+
+    <div class="export-buttons">
+      <button onclick="exportTableToCSV()">Exportar Tabla a CSV</button>
+      <button onclick="exportChartToImage()">Exportar Gráfico</button>
+    </div>
+
+    <table id="dataTable">
+      <thead></thead>
+      <tbody></tbody>
+    </table>
+
+    <canvas id="dataChart" width="800" height="400"></canvas>
+  </div>
+
+  <script>
+    let rawData = [];
+    let chart;
+
+    document.getElementById('fileInput').addEventListener('change', function(event) {
+      const file = event.target.files[0];
+      const reader = new FileReader();
+      reader.onload = function(e) {
+        const data = new Uint8Array(e.target.result);
+        const workbook = XLSX.read(data, { type: 'array' });
+        const worksheet = workbook.Sheets['Hoja1'];
+        const json = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
+
+        const headers = json[0];
+        rawData = json.slice(1).map(row => {
+          const obj = {};
+          headers.forEach((h, i) => obj[h] = row[i]);
+          obj['Alumno'] = `${obj['Nombre'] || ''} ${obj['Apellidos'] || ''}`;
+          return obj;
+        });
+
+        displayData(rawData);
+        renderChart(rawData);
+      };
+      reader.readAsArrayBuffer(file);
+    });
+
+    function displayData(data) {
+      const table = document.getElementById('dataTable');
+      const headers = Object.keys(data[0]);
+      table.querySelector('thead').innerHTML = '<tr>' + headers.map(h => `<th>${h}</th>`).join('') + '</tr>';
+      table.querySelector('tbody').innerHTML = data.map(row => `<tr>${headers.map(h => `<td>${row[h]}</td>`).join('')}</tr>`).join('');
+    }
+
+    function applyFilter() {
+      const surnameInput = document.getElementById('filterSurname').value.toUpperCase();
+      const carreraInput = document.getElementById('filterCarrera').value.toUpperCase();
+      const minAF = parseFloat(document.getElementById('filterAF').value) || 0;
+
+      const filtered = rawData.filter(row => {
+        const apellido = (row['Apellidos'] || '').toUpperCase();
+        const carrera = (row['Carrera'] || '').toUpperCase();
+
+        const afs = ['AF1', 'AF2', 'AF3', 'AF4', 'AF5', 'AF6', 'AF7'].map(k => parseFloat(row[k]) || 0);
+        const passedAF = afs.some(score => score >= minAF);
+
+        return (
+          apellido.includes(surnameInput) &&
+          carrera.includes(carreraInput) &&
+          passedAF
+        );
+      });
+
+      displayData(filtered);
+      renderChart(filtered);
+    }
+
+    function renderChart(data) {
+      const labels = data.map(row => row['Alumno']);
+      const avgScores = data.map(row => {
+        const afs = ['AF1', 'AF2', 'AF3', 'AF4', 'AF5', 'AF6', 'AF7'].map(k => parseFloat(row[k]) || 0);
+        return afs.reduce((a, b) => a + b, 0) / afs.length;
+      });
+
+      if (chart) chart.destroy();
+      chart = new Chart(document.getElementById('dataChart'), {
+        type: 'bar',
+        data: {
+          labels: labels,
+          datasets: [{
+            label: 'Promedio AFs',
+            data: avgScores,
+            backgroundColor: 'rgba(183, 28, 28, 0.6)',
+            borderColor: 'rgba(183, 28, 28, 1)',
+            borderWidth: 1
+          }]
+        },
+        options: {
+          responsive: true,
+          plugins: {
+            title: { display: true, text: 'Promedio de Actividades Fundamentales', color: '#e0e0e0' },
+            legend: { labels: { color: '#e0e0e0' } }
+          },
+          scales: {
+            x: { ticks: { color: '#e0e0e0' } },
+            y: {
+              beginAtZero: true,
+              ticks: { color: '#e0e0e0' }
+            }
+          }
+        }
+      });
+    }
+
+    function exportTableToCSV() {
+      const rows = document.querySelectorAll('table tr');
+      const csv = Array.from(rows).map(row =>
+        Array.from(row.cells).map(cell => cell.textContent).join(',')
+      ).join('\n');
+      const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+      const link = document.createElement('a');
+      link.href = URL.createObjectURL(blob);
+      link.download = 'datos_estudiantiles.csv';
+      link.click();
+    }
+
+    function exportChartToImage() {
+      const canvas = document.getElementById('dataChart');
+      const link = document.createElement('a');
+      link.download = 'grafico_estudiantil.png';
+      link.href = canvas.toDataURL('image/png');
+      link.click();
+    }
+  </script>
+</body>
+</html>
